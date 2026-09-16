@@ -74,7 +74,7 @@ jobs:
           strip src/aria2c.exe
           mkdir -p dist
           cp src/aria2c.exe dist/
-          cd dist && zip "../${{ matrix.asset }}" aria2c.exe
+          cd dist && zip "${{ matrix.asset }}" aria2c.exe
       - name: sidecar (windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
