@@ -103,7 +103,10 @@ jobs:
           grep -qE "^Static build: +yes" configure.out || { echo "=== ARIA2_STATIC 未生效 ==="; exit 1; }
           make -j"$(nproc)" LDFLAGS="-all-static"
           strip src/aria2c
-          ldd src/aria2c | tee ldd.out
+          file src/aria2c | tee file.out
+          grep -q "statically linked" file.out || { echo "=== file 判非静态 ==="; exit 1; }
+          ldd src/aria2c > ldd.out 2>&1 || true
+          cat ldd.out
           grep -q "not a dynamic executable" ldd.out || { echo "=== 非全静态,依赖如上 ==="; exit 1; }
           mkdir -p dist
           cp src/aria2c dist/
@@ -144,6 +147,7 @@ jobs:
             config.h
             configure.out
             ldd.out
+            file.out
             imports.txt
 
   release:
