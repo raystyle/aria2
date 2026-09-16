@@ -70,7 +70,7 @@ jobs:
           autoreconf -i
           ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" CFLAGS="-O2 -std=gnu17" CXXFLAGS="-O2 -std=gnu++17" LDFLAGS="-static" LIBS="-lws2_32"
           grep -n "define HAVE_WINSOCK2_H 1" config.h || { echo "=== winsock undetected; config.log excerpt ==="; awk '/checking for  winsock2.h usability/{f=1} f{print; c++} c>20{exit}' config.log; exit 1; }
-          make -j"$(nproc)" LDFLAGS="-all-static"
+          make -j"$(nproc)"
           strip src/aria2c.exe
           mkdir -p dist
           cp src/aria2c.exe dist/
@@ -92,9 +92,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
-            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev
+            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev libxml2-dev liblzma-dev
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls
+          ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls LIBS="-llzma"
           make -j"$(nproc)" LDFLAGS="-all-static"
           strip src/aria2c
           ldd src/aria2c | grep -q "not a dynamic executable" || { echo "=== 非全静态,依赖如下 ==="; ldd src/aria2c; exit 1; }
