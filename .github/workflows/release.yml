@@ -1,0 +1,136 @@
+name: release
+
+# 自建全平台编译分发(raystyle fork,2026-09-16 起;上游 release 停 1.37.0/master 活,自家出包)
+# 分工:本仓管编译与 GitHub Release;镜像入镜走 omc catalog-seed(catalog 三键驱动),仓内无 R2 面
+# 触发:推 v* tag 正式发;workflow_dispatch 仅作记录(补跑资产请重推 tag)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: tag 对 configure.ac 版本一致性闸
+        run: |
+          VER="v$(grep -oP 'AC_INIT\(\[aria2\],\[\K[0-9.]+' configure.ac)"
+          if [ "$GITHUB_REF_NAME" != "$VER" ]; then
+            echo "tag $GITHUB_REF_NAME 与 configure.ac $VER 不符"
+            exit 1
+          fi
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: aria2-x86_64-pc-windows-gnu.zip
+          - os: ubuntu-latest
+            asset: aria2-x86_64-unknown-linux-gnu.tar.gz
+          - os: macos-latest
+            asset: aria2-aarch64-apple-darwin.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # ---- windows x64(MSYS2 mingw64,静态链单 exe)----
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: mingw64
+          update: false
+          install: >-
+            git make zip autoconf automake autoconf-archive libtool pkgconf gettext
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libssh2
+            mingw-w64-x86_64-c-ares
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-zlib
+      - name: build (windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          autoreconf -i
+          ./configure --without-gnutls --with-openssl LDFLAGS="-static"
+          make -j"$(nproc)"
+          strip src/aria2c.exe
+          mkdir -p dist
+          cp src/aria2c.exe dist/
+          cd dist && zip "../${{ matrix.asset }}" aria2c.exe
+      - name: sidecar (windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd dist
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          cat "${{ matrix.asset }}.sha256"
+
+      # ---- linux x64(ubuntu,glibc 动态链)----
+      - name: build (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
+            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev
+          autoreconf -i
+          ./configure --without-gnutls --with-openssl
+          make -j"$(nproc)"
+          strip src/aria2c
+          mkdir -p dist
+          cp src/aria2c dist/
+          cd dist && tar czf "${{ matrix.asset }}" aria2c
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          cat "${{ matrix.asset }}.sha256"
+
+      # ---- macos aarch64 ----
+      - name: build (macos)
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf automake libtool pkg-config openssl@3 c-ares libssh2 sqlite3 gettext
+          export PATH="$(brew --prefix gettext)/bin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix c-ares)/lib/pkgconfig:$(brew --prefix sqlite3)/lib/pkgconfig"
+          autoreconf -i
+          ./configure --without-gnutls --with-openssl
+          make -j"$(sysctl -n hw.ncpu)"
+          strip src/aria2c
+          mkdir -p dist
+          cp src/aria2c dist/
+          cd dist && tar czf "${{ matrix.asset }}" aria2c
+          shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          cat "${{ matrix.asset }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la dist/
+          gh release create "$GITHUB_REF_NAME" --title "aria2 $GITHUB_REF_NAME" \
+            --notes "raystyle fork 自建全平台编译(三平台静态/原生构建;上游 master 快照)。资产三包加逐件 .sha256 边车。" || true
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --latest
