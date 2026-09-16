@@ -94,7 +94,7 @@ jobs:
           sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
             g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev libxml2-dev liblzma-dev libicu-dev libgmp-dev
           autoreconf -i
-          STATIC_LIBS=$(pkg-config --static --libs libxml2 openssl libssh2 libcares sqlite3 expat 2>/dev/null)
+          STATIC_LIBS=$(pkg-config --static --libs libxml2 openssl libssh2 libcares sqlite3 expat 2>/dev/null || true)
           echo "static closure: $STATIC_LIBS -lgmp"
           ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls LIBS="$STATIC_LIBS -lgmp"
           make -j"$(nproc)" LDFLAGS="-all-static"
