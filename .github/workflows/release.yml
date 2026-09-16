@@ -63,7 +63,7 @@ jobs:
         shell: msys2 {0}
         run: |
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket LDFLAGS="-static"
+          ./configure --without-gnutls --with-openssl --disable-websocket CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" LDFLAGS="-static"
           make -j"$(nproc)"
           strip src/aria2c.exe
           mkdir -p dist
