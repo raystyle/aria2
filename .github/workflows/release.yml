@@ -63,7 +63,7 @@ jobs:
         shell: msys2 {0}
         run: |
           autoreconf -i
-          ./configure --without-gnutls --with-openssl LDFLAGS="-static"
+          ./configure --without-gnutls --with-openssl --disable-websocket LDFLAGS="-static"
           make -j"$(nproc)"
           strip src/aria2c.exe
           mkdir -p dist
@@ -85,7 +85,7 @@ jobs:
           sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
             g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev
           autoreconf -i
-          ./configure --without-gnutls --with-openssl
+          ./configure --without-gnutls --with-openssl --disable-websocket
           make -j"$(nproc)"
           strip src/aria2c
           mkdir -p dist
@@ -102,7 +102,7 @@ jobs:
           export PATH="$(brew --prefix gettext)/bin:$PATH"
           export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix c-ares)/lib/pkgconfig:$(brew --prefix sqlite3)/lib/pkgconfig"
           autoreconf -i
-          ./configure --without-gnutls --with-openssl
+          ./configure --without-gnutls --with-openssl --disable-websocket
           make -j"$(sysctl -n hw.ncpu)"
           strip src/aria2c
           mkdir -p dist
