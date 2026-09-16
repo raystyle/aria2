@@ -50,7 +50,8 @@ jobs:
           msystem: mingw64
           update: false
           install: >-
-            git make zip autoconf automake autoconf-archive libtool pkgconf gettext
+            git make zip autoconf automake autoconf-archive libtool pkgconf
+            gettext gettext-devel
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-libssh2
