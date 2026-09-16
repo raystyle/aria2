@@ -119,11 +119,21 @@ bool Platform::setUp()
 
 #ifdef HAVE_OPENSSL
 #  if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#    ifdef ARIA2_STATIC_BUILD
+  // Statically linked build: loading the legacy provider would dlopen
+  // host DSOs (ossl-modules/legacy.so plus its libcrypto/libc) into the
+  // static image and crash it, and would fail (and abort startup) on
+  // machines without an OpenSSL module directory.  RC4 comes from the
+  // in-tree ARC4 backend instead, and host openssl.conf processing is
+  // skipped for the same reason.
+  OPENSSL_init_crypto(OPENSSL_INIT_NO_LOAD_CONFIG, nullptr);
+#    else
   // RC4 is in the legacy provider.
   legacy_provider_ = OSSL_PROVIDER_load(nullptr, "legacy");
   if (!legacy_provider_) {
     throw DL_ABORT_EX("OSSL_PROVIDER_load 'legacy' failed.");
   }
+#    endif // ARIA2_STATIC_BUILD
 
   default_provider_ = OSSL_PROVIDER_load(nullptr, "default");
   if (!default_provider_) {

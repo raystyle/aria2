@@ -185,6 +185,8 @@ CXXFLAGS=$save_CXXFLAGS
 
 # Check static build is requested
 if test "x$ARIA2_STATIC" = "xyes"; then
+  AC_DEFINE([ARIA2_STATIC_BUILD], [1],
+            [Define to 1 when building a statically linked aria2.])
   case "$host" in
     i686*mingw*)
       dnl Define _USE_32BIT_TIME_T because 32bit library of MinGW-w64
@@ -568,9 +570,12 @@ else
   AM_CONDITIONAL([USE_INTERNAL_BIGNUM], true)
 fi
 
-if test "x$have_libnettle" = "xyes" ||
-   test "x$have_libgcrypt" = "xyes" ||
-   test "x$have_openssl" = "xyes"; then
+# Static builds use the in-tree ARC4 so that the OpenSSL 3 legacy
+# provider (an external DSO) is never dlopen'ed into the static image.
+if { test "x$have_libnettle" = "xyes" ||
+     test "x$have_libgcrypt" = "xyes" ||
+     test "x$have_openssl" = "xyes"; } &&
+   test "x$ARIA2_STATIC" != "xyes"; then
   AM_CONDITIONAL([USE_INTERNAL_ARC4], false)
 else
   AC_DEFINE([USE_INTERNAL_ARC4], [1], [Define to 1 if internal ARC4 support is enabled.])

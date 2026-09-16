@@ -111,6 +111,7 @@ jobs:
           mkdir -p dist
           cp src/aria2c dist/
           ./dist/aria2c --version | head -1
+          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:24.04 /dist/aria2c --version | head -1
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
