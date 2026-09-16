@@ -1,6 +1,9 @@
 name: release
 
 # 自建全平台编译分发(raystyle fork,2026-09-16 起;上游 release 停 1.37.0/master 活,自家出包)
+# 自含策略:linux/win 官方 ARIA2_STATIC=yes 全静态单可执行(pkg-config 全程 --static 出全闭包,
+# 头吃到 *_STATIC 宏免 dllimport;libtool 滤 -static 故静态旗落 make 层 LDFLAGS=-all-static);
+# linux CA 走 --with-ca-bundle 系统证书;win 静态单 exe 免 mingw DLL 随包;mac 照上游 build.yml appletls 正形
 # 分工:本仓管编译与 GitHub Release;镜像入镜走 omc catalog-seed(catalog 三键驱动),仓内无 R2 面
 # 触发:推 v* tag 正式发;workflow_dispatch 仅作记录(补跑资产请重推 tag)
 
@@ -35,7 +38,7 @@ jobs:
         include:
           - os: windows-latest
             asset: aria2-x86_64-pc-windows-gnu.zip
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             asset: aria2-x86_64-unknown-linux-gnu.tar.gz
           - os: macos-latest
             asset: aria2-aarch64-apple-darwin.tar.gz
@@ -68,12 +71,16 @@ jobs:
           gcc --version | head -1
           echo "$PATH" | tr ':' '\n' | head -8
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" CFLAGS="-O2 -std=gnu17" CXXFLAGS="-O2 -std=gnu++17" LDFLAGS="-static" LIBS="-lws2_32"
+          ARIA2_STATIC=yes ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" CFLAGS="-O2 -std=gnu17" CXXFLAGS="-O2 -std=gnu++17" LDFLAGS="-static" LIBS="-lws2_32" 2>&1 | tee configure.out
+          grep -qE "^Static build: +yes" configure.out || { echo "=== ARIA2_STATIC 未生效 ==="; exit 1; }
           grep -n "define HAVE_WINSOCK2_H 1" config.h || { echo "=== winsock undetected; config.log excerpt ==="; awk '/checking for  winsock2.h usability/{f=1} f{print; c++} c>20{exit}' config.log; exit 1; }
-          make -j"$(nproc)"
+          make -j"$(nproc)" LDFLAGS="-all-static"
           strip src/aria2c.exe
+          objdump -p src/aria2c.exe | grep "DLL Name:" | tee imports.txt
+          if grep -qiE "DLL Name: (lib|msys-|zlib1)" imports.txt; then echo "=== mingw DLL 依赖残留,非静态单 exe ==="; cat imports.txt; exit 1; fi
           mkdir -p dist
           cp src/aria2c.exe dist/
+          PATH="/c/Windows/System32:/c/Windows" ./dist/aria2c.exe --version | head -1
           cd dist && zip "${{ matrix.asset }}" aria2c.exe
       - name: sidecar (windows)
         if: runner.os == 'Windows'
@@ -83,19 +90,24 @@ jobs:
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
 
-      # ---- linux x64(ubuntu,glibc 动态链)----
+      # ---- linux x64(ubuntu-22.04,全静态单可执行;22.04 的 libc-ares-dev 带 libcares.a)----
       - name: build (linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
-            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev
+            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev \
+            libxml2-dev liblzma-dev libicu-dev libgmp-dev libgpg-error-dev libgcrypt-dev
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket
-          make -j"$(nproc)"
+          ARIA2_STATIC=yes ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt 2>&1 | tee configure.out
+          grep -qE "^Static build: +yes" configure.out || { echo "=== ARIA2_STATIC 未生效 ==="; exit 1; }
+          make -j"$(nproc)" LDFLAGS="-all-static"
           strip src/aria2c
+          ldd src/aria2c | tee ldd.out
+          grep -q "not a dynamic executable" ldd.out || { echo "=== 非全静态,依赖如上 ==="; exit 1; }
           mkdir -p dist
           cp src/aria2c dist/
+          ./dist/aria2c --version | head -1
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
@@ -104,15 +116,15 @@ jobs:
       - name: build (macos)
         if: runner.os == 'macOS'
         run: |
-          brew install autoconf automake libtool pkg-config openssl@3 c-ares libssh2 sqlite3 gettext
+          brew install autoconf automake libtool pkg-config gettext c-ares libssh2 sqlite3
           export PATH="$(brew --prefix gettext)/bin:$PATH"
-          export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix c-ares)/lib/pkgconfig:$(brew --prefix sqlite3)/lib/pkgconfig"
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket
+          ./configure --without-openssl --without-gnutls --with-appletls --disable-nls --disable-websocket
           make -j"$(sysctl -n hw.ncpu)"
           strip src/aria2c
           mkdir -p dist
           cp src/aria2c dist/
+          ./dist/aria2c --version | head -1
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
@@ -123,13 +135,16 @@ jobs:
           path: dist/${{ matrix.asset }}*
 
       - name: dump diag on failure
-        if: failure() && runner.os == 'Windows'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: diag-windows
+          name: diag-${{ matrix.asset }}
           path: |
             config.log
             config.h
+            configure.out
+            ldd.out
+            imports.txt
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
@@ -147,6 +162,6 @@ jobs:
         run: |
           ls -la dist/
           gh release create "$GITHUB_REF_NAME" --title "aria2 $GITHUB_REF_NAME" \
-            --notes "raystyle fork 自建全平台编译(三平台静态/原生构建;上游 master 快照)。资产三包加逐件 .sha256 边车。" || true
+            --notes "raystyle fork 自建全平台编译(linux/win 全静态单可执行,mac 原生 appletls;上游 master 快照)。资产三包加逐件 .sha256 边车。" || true
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           gh release edit "$GITHUB_REF_NAME" --latest
