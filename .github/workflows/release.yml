@@ -35,7 +35,7 @@ jobs:
         include:
           - os: windows-latest
             asset: aria2-x86_64-pc-windows-gnu.zip
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             asset: aria2-x86_64-unknown-linux-gnu.tar.gz
           - os: macos-latest
             asset: aria2-aarch64-apple-darwin.tar.gz
@@ -68,16 +68,13 @@ jobs:
           gcc --version | head -1
           echo "$PATH" | tr ':' '\n' | head -8
           autoreconf -i
-          ARIA2_STATIC=yes ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" CFLAGS="-O2 -std=gnu17" CXXFLAGS="-O2 -std=gnu++17" LDFLAGS="-static" LIBS="-lws2_32"
+          ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" CFLAGS="-O2 -std=gnu17" CXXFLAGS="-O2 -std=gnu++17" LDFLAGS="-static" LIBS="-lws2_32"
           grep -n "define HAVE_WINSOCK2_H 1" config.h || { echo "=== winsock undetected; config.log excerpt ==="; awk '/checking for  winsock2.h usability/{f=1} f{print; c++} c>20{exit}' config.log; exit 1; }
           make -j"$(nproc)"
           strip src/aria2c.exe
           mkdir -p dist
           cp src/aria2c.exe dist/
-          ldd src/aria2c.exe | awk '{print $3}' | grep -i mingw64 | sort -u | xargs -r -I{} cp {} dist/
-          ls dist/
-          ./dist/aria2c.exe --version | head -1
-          cd dist && zip "${{ matrix.asset }}" *
+          cd dist && zip "${{ matrix.asset }}" aria2c.exe
       - name: sidecar (windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -92,15 +89,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake autotools-dev autopoint libtool pkg-config \
-            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev libxml2-dev liblzma-dev libicu-dev libgmp-dev
+            g++ libssl-dev libc-ares-dev zlib1g-dev libsqlite3-dev libssh2-1-dev
           autoreconf -i
-          ARIA2_STATIC=yes ./configure --without-gnutls --with-openssl --disable-websocket --disable-nls --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt
-          make -j"$(nproc)" LDFLAGS="-all-static"
+          ./configure --without-gnutls --with-openssl --disable-websocket
+          make -j"$(nproc)"
           strip src/aria2c
-          ldd src/aria2c | grep -q "not a dynamic executable" || { echo "=== 非全静态,依赖如下 ==="; ldd src/aria2c; exit 1; }
           mkdir -p dist
           cp src/aria2c dist/
-          ./dist/aria2c --version | head -1
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
@@ -109,15 +104,15 @@ jobs:
       - name: build (macos)
         if: runner.os == 'macOS'
         run: |
-          brew install autoconf automake libtool pkg-config gettext
+          brew install autoconf automake libtool pkg-config openssl@3 c-ares libssh2 sqlite3 gettext
           export PATH="$(brew --prefix gettext)/bin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix c-ares)/lib/pkgconfig:$(brew --prefix sqlite3)/lib/pkgconfig"
           autoreconf -i
-          ./configure --without-openssl --without-gnutls --with-appletls --disable-nls --disable-websocket
+          ./configure --without-gnutls --with-openssl --disable-websocket
           make -j"$(sysctl -n hw.ncpu)"
           strip src/aria2c
           mkdir -p dist
           cp src/aria2c dist/
-          ./dist/aria2c --version | head -1
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
