@@ -63,7 +63,8 @@ jobs:
         shell: msys2 {0}
         run: |
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" LDFLAGS="-static"
+          ./configure --without-gnutls --with-openssl --disable-websocket CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" LDFLAGS="-static" || { echo "=== config.log tail ==="; tail -120 config.log; exit 1; }
+          grep -n "HAVE_WINSOCK2_H\|HAVE_WS2TCPIP" config.h || echo "no winsock defines"
           make -j"$(nproc)"
           strip src/aria2c.exe
           mkdir -p dist
