@@ -58,6 +58,8 @@ jobs:
             mingw-w64-x86_64-c-ares
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-libiconv
+            mingw-w64-x86_64-gettext
       - name: build (windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -66,7 +68,7 @@ jobs:
           gcc --version | head -1
           echo "$PATH" | tr ':' '\n' | head -8
           autoreconf -i
-          ./configure --without-gnutls --with-openssl --disable-websocket CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" LDFLAGS="-static"
+          ./configure --without-gnutls --with-openssl --disable-websocket CPPFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601" LDFLAGS="-static" LIBS="-lws2_32 -liconv -lintl"
           grep -n "define HAVE_WINSOCK2_H 1" config.h || { echo "=== winsock undetected; config.log excerpt ==="; grep -B2 -A25 "conftest.c:.*strerror\|undefined reference" config.log | head -60; exit 1; }
           make -j"$(nproc)"
           strip src/aria2c.exe
