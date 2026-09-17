@@ -181,8 +181,9 @@ jobs:
   # ---- R2 种子段直推(tag 发版后自动;dispatch 带 version 幂等重推)----
   mirror:
     if: >-
-      needs.release.result == 'success' ||
-      (github.event_name == 'workflow_dispatch' && inputs.version != '')
+      always() &&
+      (needs.release.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && inputs.version != ''))
     needs: release
     runs-on: ubuntu-latest
     steps:
