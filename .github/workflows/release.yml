@@ -81,7 +81,8 @@ jobs:
           if grep -qiE "DLL Name: (lib|msys-|zlib1)" imports.txt; then echo "=== mingw DLL 依赖残留,非静态单 exe ==="; cat imports.txt; exit 1; fi
           mkdir -p dist
           cp src/aria2c.exe dist/
-          PATH="/c/Windows/System32:/c/Windows" ./dist/aria2c.exe --version | head -1
+          PATH="/c/Windows/System32:/c/Windows" ./dist/aria2c.exe --version | head -1 | tr -d "\r" | tee smoke.out
+          grep -qx "aria2 version ${GITHUB_REF_NAME#v}" smoke.out || { echo "=== 冒烟版本与 tag 不符 ==="; cat smoke.out; exit 1; }
           cd dist && zip "${{ matrix.asset }}" aria2c.exe
       - name: sidecar (windows)
         if: runner.os == 'Windows'
@@ -111,8 +112,10 @@ jobs:
           grep -q "not a dynamic executable" ldd.out || { echo "=== 非全静态,依赖如上 ==="; exit 1; }
           mkdir -p dist
           cp src/aria2c dist/
-          ./dist/aria2c --version | head -1
-          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:24.04 /dist/aria2c --version | head -1
+          ./dist/aria2c --version | head -1 | tee smoke.out
+          grep -qx "aria2 version ${GITHUB_REF_NAME#v}" smoke.out || { echo "=== 冒烟版本与 tag 不符 ==="; cat smoke.out; exit 1; }
+          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:24.04 /dist/aria2c --version | head -1 | tr -d "\r" | tee docker-smoke.out
+          grep -qx "aria2 version ${GITHUB_REF_NAME#v}" docker-smoke.out || { echo "=== 跨宿主冒烟版本与 tag 不符 ==="; cat docker-smoke.out; exit 1; }
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
@@ -129,7 +132,8 @@ jobs:
           strip src/aria2c
           mkdir -p dist
           cp src/aria2c dist/
-          ./dist/aria2c --version | head -1
+          ./dist/aria2c --version | head -1 | tee smoke.out
+          grep -qx "aria2 version ${GITHUB_REF_NAME#v}" smoke.out || { echo "=== 冒烟版本与 tag 不符 ==="; cat smoke.out; exit 1; }
           cd dist && tar czf "${{ matrix.asset }}" aria2c
           shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
           cat "${{ matrix.asset }}.sha256"
@@ -167,7 +171,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dist/
-          gh release create "$GITHUB_REF_NAME" --title "aria2 $GITHUB_REF_NAME" \
-            --notes "raystyle fork 自建全平台编译(linux/win 全静态单可执行,mac 原生 appletls;上游 master 快照)。资产三包加逐件 .sha256 边车。" || true
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" dist/* --latest --title "aria2 $GITHUB_REF_NAME" \
+              --notes "raystyle fork 自建全平台编译(linux/win 全静态单可执行,mac 原生 appletls;上游 master 快照)。资产三包加逐件 .sha256 边车。"
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          gh release edit "$GITHUB_REF_NAME" --latest
