@@ -1,0 +1,65 @@
+name: r2-seed
+
+# R2 种子播种(总台 build-release 标准形,2026-09-17 迁独立 workflow 核准):
+# 触发 = Release published 事件(gh 直发即播)或 workflow_dispatch 带 tag 补推(不依赖重跑任何链)
+# 段制:aria2/<版本>/ immutable copy-only + aria2/stable/ 滚动 sync --delete-excluded
+# 护栏:零上传红灯双段报数;INC 包形白名单(裸件不灌);--checksum;边车锚推前自检
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '补推的 v* tag(从 Release 拉资产重灌)'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    if: ${{ !github.event.release.prerelease || inputs.tag != '' }}
+    runs-on: ubuntu-latest
+    env:
+      # env-remote 形:命名 remote r2:,四键走 Secrets,NO_CHECK_BUCKET 必带(受限 token 无建桶权)
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - name: 取资产并边车自检
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then echo "::error::无 tag(dispatch 请带 tag 入参)"; exit 1; fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"; echo "VER=${TAG#v}" >> "$GITHUB_ENV"
+          mkdir -p dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -D dist --clobber
+          cd dist
+          ls -la
+          sha256sum -c ./*.sha256
+      - run: command -v rclone || (curl -fsSL https://rclone.org/install.sh | sudo bash)
+      - name: 灌段(版本段 immutable 加 stable 滚动)
+        run: |
+          set -euo pipefail
+          INC=(--include "*.zip" --include "*.tar.gz" --include "*.tgz" --include "*.whl" --include "*.sha256")
+          rclone copy dist/ "r2:${R2_BUCKET}/aria2/${VER}/" "${INC[@]}" \
+            --header-upload "Cache-Control: public, max-age=31536000, immutable" \
+            --checksum -v --stats-one-line
+          rclone sync dist/ "r2:${R2_BUCKET}/aria2/stable/" "${INC[@]}" \
+            --header-upload "Cache-Control: public, max-age=60" --delete-excluded
+      - name: 零上传红灯(版本段与 stable 段分别清点报数,任一零即红)
+        run: |
+          set -euo pipefail
+          nv=$(rclone lsf "r2:${R2_BUCKET}/aria2/${VER}/" | wc -l)
+          ns=$(rclone lsf "r2:${R2_BUCKET}/aria2/stable/" | wc -l)
+          [ "$nv" -gt 0 ] || { echo "::error::镜像版本段零对象"; exit 1; }
+          [ "$ns" -gt 0 ] || { echo "::error::stable 段零对象(漏滚)"; exit 1; }
+          echo "mirror objects: ver=$nv stable=$ns"
+      - name: 对账回显
+        run: rclone lsl "r2:${R2_BUCKET}/aria2/${VER}/"
