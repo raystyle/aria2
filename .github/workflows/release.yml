@@ -4,13 +4,20 @@ name: release
 # 自含策略:linux/win 官方 ARIA2_STATIC=yes 全静态单可执行(pkg-config 全程 --static 出全闭包,
 # 头吃到 *_STATIC 宏免 dllimport;libtool 滤 -static 故静态旗落 make 层 LDFLAGS=-all-static);
 # linux CA 走 --with-ca-bundle 系统证书;win 静态单 exe 免 mingw DLL 随包;mac 照上游 build.yml appletls 正形
-# 分工:本仓管编译与 GitHub Release;镜像入镜走 omc catalog-seed(catalog 三键驱动),仓内无 R2 面
-# 触发:推 v* tag 正式发;workflow_dispatch 仅作记录(补跑资产请重推 tag)
+# 分工:本仓管编译与 GitHub Release + mirror job 直推 R2 种子段 aria2/<版本>/(用户裁 2026-09-17 起,
+# CI 自推种子接线;catalog 三键仍归总台);env 形 rclone remote(PROVIDER=Cloudflare+NO_CHECK_BUCKET,
+# 版本段 Cache-Control immutable 头,digest 同即幂等覆盖)
+# 触发:推 v* tag 正式发;workflow_dispatch 带 version 输入仅重推镜像段(幂等验证用)
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: '要重推镜像段的 tag(如 v1.37.2;留空则只记录)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -170,3 +177,43 @@ jobs:
             --notes "raystyle fork 自建全平台编译(linux/win 全静态单可执行,mac 原生 appletls;上游 master 快照)。资产三包加逐件 .sha256 边车。" || true
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           gh release edit "$GITHUB_REF_NAME" --latest
+
+  # ---- R2 种子段直推(tag 发版后自动;dispatch 带 version 幂等重推)----
+  mirror:
+    if: >-
+      needs.release.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: install rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          sudo unzip -j -o /tmp/rclone.zip '*/rclone' -d /usr/local/bin
+          rclone version | head -2
+      - name: download release assets and recheck digests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ (github.event_name == 'workflow_dispatch' && inputs.version) || github.ref_name }}"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          mkdir -p dist
+          gh release download "$VER" -R "$GITHUB_REPOSITORY" -D dist
+          cd dist
+          ls -la
+          sha256sum -c ./*.sha256
+      - name: push to R2 segment aria2/$VER
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ENV_AUTH: true
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: true
+        run: |
+          BUCKET="${{ secrets.R2_BUCKET }}"
+          SEG="r2:${BUCKET}/aria2/${VER}"
+          rclone copy dist "$SEG" --header-upload "Cache-Control: public, max-age=31536000, immutable" -v
+          rclone lsl "$SEG" | tee lsl.out
+          test "$(wc -l < lsl.out)" -eq 6 || { echo "=== 段内对象数非六 ==="; exit 1; }
