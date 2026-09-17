@@ -44,3 +44,6 @@ compile
 main.log
 main.trs
 test-suite.log
+
+# 统一发布脚本收拢区(产物零 commit 回仓)
+dist/
